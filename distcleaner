@@ -1,0 +1,292 @@
+#!/usr/bin/python
+#
+# Copyright (c) 2004 by Juan F. Codagnone <juam@users.sourceforge.net>
+# With portions of: Copyright 1999-2003 Gentoo Technologies, Inc.
+# (DistfilesCleaner.__countdown)
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; dweither version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+# 
+
+__author__      = 'Juan F. Codagnone'
+__email__       = 'juam@users.sourceforge.net'  
+__version__     = '0.0.1'
+__productname__ = 'distcleaner'
+__description__ = 'Gentoo distcleaner utility'
+
+import sys
+import os
+import stat
+
+sys.path.insert(0, '/usr/lib/gentoolkit/pym')
+import gentoolkit
+import output
+import portage
+
+#
+# To add a new policy you will need to create a Class that inherits
+# DistfilesCleaner class, (see Policy Implementations section)
+#
+
+class DistfilesCleaner:
+	""" Abstract class
+
+	    All the differents polices for cleaning the distfiles directories, 
+	    should inherit from this class, and override the abstract
+	    methods (the one that have the pass keywords)
+	"""
+	pretend = 0	# dry-run?
+	distfile_path = '/usr/portage/distfiles';
+
+	def set_pretend(self, bValue):
+		""" sets the pretend (do nothing) flag """
+		self.pretend = bValue
+	
+	def set_distdir(self, szDir):
+		""" sets the distdir directory to a custom value """
+		st = os.stat(szDir)
+		if stat.S_ISDIR(st[stat.ST_MODE]):
+			self.distfile_path = szDir
+		else:
+			raise Exception("%s is not a directory" % szDir)
+
+	def __get_distfiles(self):
+		""" Returns a dictionary (i, value), with the filename to
+		    and its size. called from #perform(). protected
+		"""
+		ret = {}
+		for i in os.listdir(self.distfile_path):
+			st = os.stat('%s/%s' % (self.distfile_path, i))
+			if stat.S_ISREG(st[stat.ST_MODE]):
+				ret[i]=st[stat.ST_SIZE]
+		return ret
+ 
+	def select_files_to_delete(self,hash):
+		""" policy for the clean: this method leaves in the hash
+		    the entries that you want to delete. When the method is 
+		    called the hash contains all the source files avalailable
+
+		    Abstract
+		"""
+		pass
+
+	def __countdown(self, secs=5, doing="Starting"):
+		""" borrowed from /usr/bin/emerge 1.264 (2004/02/08)
+		    shows a countdown message. called from perform
+		"""
+		import time
+		if secs:
+			print ">>> Waiting",secs,"seconds before starting..."
+			print ">>> (Control-C to abort)...\n"+doing+" in: ",
+			ticks=range(secs)
+			ticks.reverse()
+			for sec in ticks:
+				sys.stdout.write(output.red(str(sec+1)+" "))
+				sys.stdout.flush()
+				time.sleep(1)
+			print
+			
+	def __delete_filename(self, filename):
+		""" deletes a filename. called by #perform() """
+		file = "%s/%s" % (self.distfile_path, filename)
+		try:
+			os.remove(file);
+		except OSError, e:
+			print "!!! couldn't delete file `%s'" % (file)
+			print "!!! reason: %s" % (e.strerror) 
+			
+	def perform(self):
+		""" Deletes the files that the policy dictates.
+		    if the self.pretend variable is True, it has to print the 
+		    files.
+		"""
+		hash = self.__get_distfiles()
+		self.select_files_to_delete(hash)
+		acc = 0
+		for (i, value) in hash.iteritems():
+			acc = acc + value
+			if self.pretend:
+				print '%-60s [%-6s kB]' % (output.darkgreen(i),\
+				                           value/1024)
+				
+		print '\nTotal size saved: %d kB (%d files)' % (acc / 1024, \
+		                                               len(hash))
+		if self.pretend:
+			pass
+		else:	# ok. clean them all!
+			worked = 1
+			try:
+				print
+				self.__countdown()
+				print '\nCleaning %s files' %  \
+				        output.yellow("%d" % len(hash)) 
+			except:
+				worked = 0
+				print '\nclean %s' % output.red('CANCELED')
+
+			if worked:
+				for filename in hash.iterkeys():
+					self.__delete_filename(filename)
+	
+		
+##### Policy Implementations #################################################
+
+class DistfilesCleanerSmallFiles(DistfilesCleaner):
+	def select_files_to_delete(self, hash):
+		""" policy: it removes all smaller than 1024 KB. The idea
+		    is that you can download those in small time window
+		"""
+		popme = []
+		for (file, size) in hash.iteritems():
+			if size >= 1024 * 1024:
+				popme.append(file)
+
+		for file in popme:
+			hash.pop(file, 0)
+
+
+class DistfilesCleanerNonInstalled(DistfilesCleaner):
+	def select_files_to_delete(self,hash):
+		""" policy: it removes all the files that aren't needed to 
+		            reconstruct the system
+		"""
+		for pkg in gentoolkit.find_all_installed_packages():
+			worked = 1
+			try:	# there is a little bug in gentoolkit that can
+			        # raise an exception. there is no solution.
+				# bah!!! wait the portage-ng
+				# http://bugs.gentoo.org/show_bug.cgi?id=47190
+				src = pkg.get_env_var('SRC_URI')
+			except:
+				worked = 0
+				# print pkg.get_ebuild_path(1)
+			if worked:
+				# parse SRC_URI. there is no mothod in the 
+				# portage module to do this
+				src=src.replace("(", " ( ");
+				src=src.replace(")", " ) ");
+				fields = src.split()
+				for url in fields:
+					if url == '(' or url == ')':
+						pass
+					elif url[len(url)-1]=='?':
+						pass
+					else:
+						f = url.split('/')
+						if len(f):
+							file = f[len(f)-1]
+							if hash.has_key(file):
+								hash.pop(file,0)
+
+
+
+##### End of Policy Implementations ###########################################
+
+action_list = [ ('not_installed', DistfilesCleanerNonInstalled),
+	        ('small_files',   DistfilesCleanerSmallFiles)
+              ]
+
+##### Main program
+
+	
+def help(progname):
+	print '%s: please tell me what to do' % progname
+	print ''
+	print 'Usage: %s [ %s ] [ %s ]' % (output.turquoise(progname),
+					   output.green('options'), \
+					   output.green('action')
+					  )
+	print 
+	print 'Options:  -[ %s | %s | %s | %s distdir | %s action ] ' % \
+	      ( output.green('h'), output.green('V'), output.green('p'),
+	        output.green('d'), output.green('a')  )
+	        
+		
+	print '         --[ %s | %s | %s | %s distdir | %s action ]'% (\
+	        output.green('help'), output.green('version'),
+		output.green('pretend'), output.green('distdir'),
+		output.green('action'))
+	      
+	        
+	print 'Actions:   %s' % ([x[0] for x in action_list]) 
+	print
+	print "Cleans Gentoo's distdir directory, using action as a policy"
+	print
+	sys.exit(0)
+
+def version(progname):
+	print '%s v%s (%s) by %s <%s>' % (progname, __version__,\
+	                                  __description__, __author__,\
+					  __email__)
+	print
+	print 'This is free software:'
+	print 'There is NO warranty; not even for MERCHANTABILITY or'
+	print 'FITNESS FOR A PARTICULAR PURPOSE'
+	print
+	sys.exit(0)
+
+
+def main():
+	import getopt
+
+	pretend = 0
+	distdir= ''
+	action = ''
+	
+	progname = os.path.basename(sys.argv[0])
+	try:
+		opts, args = getopt.getopt(sys.argv[1:], 'hVpd:a:', \
+		                           ['help','version','pretend',
+					     'distdir=', 'action=' ])
+		for opt, arg in opts:
+			if opt in ('-h', '--help'):
+				help(progname);
+			elif opt in ('-p', '--pretend'):
+				pretend = 1
+			elif opt in ('-V', '--version'):
+				version(progname);
+			elif opt in ('-d', '--distdir'):
+				distdir = arg
+			elif opt in ('-a', '--action'):
+				action = arg
+	except getopt.error, msg:
+		print '%s: %s' % (progname, output.red(str(msg)) )
+		help(progname)
+
+
+	if action == '':
+		help(progname)
+	else:
+		if not action in [x[0] for x in action_list]:
+			print "invalid action `%s' " % action
+			print "valid actions: %s" % [x[0] for x in action_list]
+		else:
+			for i in action_list:
+				if i[0]  == action:
+					d = i[1]()
+			worked = 1
+			if distdir != '':
+				try:
+					d.set_distdir(distdir);
+				except Exception, e:
+					worked = 0
+					print 'error: %s' % output.red(str(e))
+			if worked:
+				d.set_pretend(pretend)
+				d.perform()
+		
+		
+	
+if __name__ == '__main__':
+	main()

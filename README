@@ -1,0 +1,7 @@
+
+MOTIVATION
+
+The /usr/portage/distfiles grows and grows without limit.  distcleaner is a
+program that implement differents policies to clean that directory.
+
+
