@@ -1,0 +1,7 @@
+Fri Dec 31 17:00:25 ART 2004
+   Fix the DistfilesCleanerNonInstalled strategy. The new portage system 
+   (2.0.51-r3) provides a new way to get SRC_URI files. The old way to get that
+   information is still there, but is broken!. That broke the stratagy. It
+   wanted to erase all the files.
+   The problem was noticed by Daniel Schregenberger <npfdd (at) gmx /dot/ ch>
+   

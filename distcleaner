@@ -162,35 +162,27 @@ class DistfilesCleanerNonInstalled(DistfilesCleaner):
 	    the system. Usefull when you don't share distfile with another box.
 	"""
 	def select_files_to_delete(self,hash):
-		
 		for pkg in gentoolkit.find_all_installed_packages():
+			files = []
 			worked = 1
+			
 			try:	# there is a little bug in gentoolkit that can
 			        # raise an exception. there is no solution.
 				# bah!!! wait the portage-ng
 				# http://bugs.gentoo.org/show_bug.cgi?id=47190
-				src = pkg.get_env_var('SRC_URI')
+				db = portage.db[portage.root]["porttree"].dbapi
+				files = db.getfetchlist(pkg.get_cpv())[1]
+				if len(files)  == 0: 
+					print "error! can't found SRC_URI "\
+					      "for %s" % (pkg.get_cpv() )
 			except:
 				worked = 0
 				# print pkg.get_ebuild_path(1)
-			if worked:
-				# parse SRC_URI. there is no mothod in the 
-				# portage module to do this
-				src=src.replace("(", " ( ");
-				src=src.replace(")", " ) ");
-				fields = src.split()
-				for url in fields:
-					if url == '(' or url == ')':
-						pass
-					elif url[len(url)-1]=='?':
-						pass
-					else:
-						f = url.split('/')
-						if len(f):
-							file = f[len(f)-1]
-							if hash.has_key(file):
-								hash.pop(file,0)
 
+			if worked:
+				for file in files:
+					if hash.has_key(file):
+						hash.pop(file,0)
 
 
 ##### End of Policy Implementations ###########################################
