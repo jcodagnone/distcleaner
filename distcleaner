@@ -23,12 +23,13 @@ __author__      = 'Juan F. Codagnone'
 __email__       = 'juam@users.sourceforge.net'  
 __version__     = '0.0.1'
 __productname__ = 'distcleaner'
-__description__ = 'Gentoo distcleaner utility'
+__description__ = 'Gentoo /usr/portage/distfiles cleaner utility'
 
 import sys
 import os
 import stat
 
+# we use gentoolkit 
 sys.path.insert(0, '/usr/lib/gentoolkit/pym')
 import gentoolkit
 import output
@@ -143,10 +144,10 @@ class DistfilesCleaner:
 ##### Policy Implementations #################################################
 
 class DistfilesCleanerSmallFiles(DistfilesCleaner):
+	""" policy: it removes all the files smaller than 1024 KB. The idea
+	    is that you can download those in small time window
+	"""
 	def select_files_to_delete(self, hash):
-		""" policy: it removes all smaller than 1024 KB. The idea
-		    is that you can download those in small time window
-		"""
 		popme = []
 		for (file, size) in hash.iteritems():
 			if size >= 1024 * 1024:
@@ -157,10 +158,11 @@ class DistfilesCleanerSmallFiles(DistfilesCleaner):
 
 
 class DistfilesCleanerNonInstalled(DistfilesCleaner):
+	""" policy: it removes all the files that aren't needed to reconstruct
+	    the system. Usefull when you don't share distfile with another box.
+	"""
 	def select_files_to_delete(self,hash):
-		""" policy: it removes all the files that aren't needed to 
-		            reconstruct the system
-		"""
+		
 		for pkg in gentoolkit.find_all_installed_packages():
 			worked = 1
 			try:	# there is a little bug in gentoolkit that can
